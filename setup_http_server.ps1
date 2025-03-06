@@ -3,7 +3,7 @@ Write-Host "Setting up http-zerver..."
 
 # Step 1: Clone the repository
 Write-Host "Cloning http-zerver repository..."
-git clone https://github.com/Hotschmoe/http-zerver
+git clone https://github.com/haleth-embershield/http-zerver
 
 # Step 2: Change directory into the repo
 Set-Location -Path http-zerver
