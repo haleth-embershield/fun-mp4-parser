@@ -1,0 +1,899 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MP4 Audio Parser (Zig WASM)</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Oxygen, Ubuntu, Cantarell, 'Open Sans', 'Helvetica Neue', sans-serif;
+            margin: 0;
+            padding: 0;
+            background-color: #f5f5f5;
+            position: relative;
+            overflow: hidden;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+        }
+        #byte-background {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            z-index: -1;
+            color: rgba(60, 60, 60, 0.2);
+            font-family: monospace;
+            overflow: hidden;
+            pointer-events: none;
+            box-sizing: border-box;
+            padding: 0;
+            margin: 0;
+        }
+        #byte-content {
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            box-sizing: border-box;
+            padding: 5px;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: flex-start;
+        }
+        .byte-line {
+            width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+            white-space: nowrap;
+            text-align: center;
+            opacity: 1;
+        }
+        .container {
+            background-color: rgba(255, 255, 255, 0.8);
+            padding: 20px;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+            backdrop-filter: blur(5px);
+            -webkit-backdrop-filter: blur(5px);
+            max-width: 500px;
+            width: 90%;
+            z-index: 1;
+        }
+        h1 {
+            color: #333;
+            margin-top: 0;
+            font-size: 1.5rem;
+            text-align: center;
+        }
+        .upload-area {
+            border: 2px dashed #ccc;
+            border-radius: 8px;
+            padding: 20px;
+            text-align: center;
+            margin: 15px 0;
+            transition: border-color 0.3s;
+            background-color: rgba(250, 250, 250, 0.7);
+        }
+        .upload-area.drag-over {
+            border-color: #2196F3;
+            background-color: rgba(227, 242, 253, 0.7);
+        }
+        button {
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            padding: 8px 12px;
+            text-align: center;
+            text-decoration: none;
+            display: inline-block;
+            font-size: 14px;
+            margin: 4px 2px;
+            cursor: pointer;
+            border-radius: 4px;
+        }
+        button:disabled {
+            background-color: #cccccc;
+            cursor: not-allowed;
+        }
+        #audio-container {
+            margin-top: 15px;
+            display: none;
+            background-color: rgba(240, 240, 240, 0.8);
+            border-radius: 4px;
+            padding: 15px;
+        }
+        #audio-controls {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 15px;
+        }
+        #progress-container {
+            flex-grow: 1;
+            background: #ddd;
+            height: 10px;
+            border-radius: 5px;
+            position: relative;
+            cursor: pointer;
+        }
+        #progress-bar {
+            background: #2196F3;
+            height: 100%;
+            border-radius: 5px;
+            width: 0%;
+            transition: width 0.1s linear;
+        }
+        #filter-controls {
+            margin-top: 15px;
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+        }
+        .filter-group {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        .filter-group label {
+            font-size: 0.9em;
+            color: #555;
+        }
+        .filter-group input[type="range"] {
+            width: 100%;
+        }
+        .filter-value {
+            font-size: 0.8em;
+            color: #666;
+            text-align: center;
+        }
+        .status {
+            margin-top: 10px;
+            color: #555;
+            font-size: 0.9rem;
+            text-align: center;
+        }
+        .controls {
+            display: none;
+        }
+        .speed-control {
+            display: none;
+        }
+        /* Metadata display styles */
+        #metadata-container {
+            margin-top: 15px;
+            display: none;
+            background-color: rgba(240, 240, 240, 0.8);
+            border-radius: 4px;
+            padding: 10px;
+            font-family: monospace;
+            font-size: 14px;
+        }
+        .metadata-row {
+            display: flex;
+            justify-content: space-between;
+            margin-bottom: 5px;
+        }
+        .metadata-label {
+            color: #555;
+            flex: 1;
+        }
+        .metadata-value {
+            color: #333;
+            flex: 1;
+            text-align: right;
+            font-weight: bold;
+        }
+    </style>
+</head>
+<body>
+    <div id="byte-background">
+        <div id="byte-content"></div>
+    </div>
+    <div class="container">
+        <h1>MP4 Audio Parser</h1>
+        
+        <div id="upload-area" class="upload-area">
+            <p>Drop MP4 file here</p>
+            <input type="file" id="file-input" accept="video/mp4,audio/mp4" style="display: none;">
+            <button id="select-file">Select File</button>
+        </div>
+        
+        <div class="status">
+            <p id="status">WASM module loading...</p>
+        </div>
+        
+        <div id="metadata-container">
+            <div class="metadata-row">
+                <span class="metadata-label">Codec:</span>
+                <span id="metadata-codec" class="metadata-value">-</span>
+            </div>
+            <div class="metadata-row">
+                <span class="metadata-label">Bitrate:</span>
+                <span id="metadata-bitrate" class="metadata-value">-</span>
+            </div>
+            <div class="metadata-row">
+                <span class="metadata-label">Size:</span>
+                <span id="metadata-size" class="metadata-value">-</span>
+            </div>
+            <div class="metadata-row">
+                <span class="metadata-label">Sample Rate:</span>
+                <span id="metadata-sample-rate" class="metadata-value">-</span>
+            </div>
+            <div class="metadata-row">
+                <span class="metadata-label">Sample Size:</span>
+                <span id="metadata-sample-size" class="metadata-value">-</span>
+            </div>
+            <div class="metadata-row">
+                <span class="metadata-label">Samples:</span>
+                <span id="metadata-samples" class="metadata-value">-</span>
+            </div>
+        </div>
+        
+        <div id="audio-container">
+            <div id="audio-controls">
+                <button id="play-btn">Play</button>
+                <button id="pause-btn" disabled>Pause</button>
+                <div id="progress-container">
+                    <div id="progress-bar"></div>
+                </div>
+                <span id="time-display">0:00 / 0:00</span>
+            </div>
+            
+            <div id="filter-controls">
+                <div class="filter-group">
+                    <label for="lowpass">Lowpass Filter (Hz)</label>
+                    <input type="range" id="lowpass" min="20" max="20000" value="20000" step="1">
+                    <div class="filter-value" id="lowpass-value">20000 Hz</div>
+                </div>
+                <div class="filter-group">
+                    <label for="gain">Gain</label>
+                    <input type="range" id="gain" min="0" max="2" value="1" step="0.1">
+                    <div class="filter-value" id="gain-value">1.0</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // DOM elements
+        const uploadArea = document.getElementById('upload-area');
+        const fileInput = document.getElementById('file-input');
+        const selectButton = document.getElementById('select-file');
+        const statusElement = document.getElementById('status');
+        const audioContainer = document.getElementById('audio-container');
+        const playBtn = document.getElementById('play-btn');
+        const pauseBtn = document.getElementById('pause-btn');
+        const progressContainer = document.getElementById('progress-container');
+        const progressBar = document.getElementById('progress-bar');
+        const timeDisplay = document.getElementById('time-display');
+        const lowpassControl = document.getElementById('lowpass');
+        const gainControl = document.getElementById('gain');
+        const lowpassValue = document.getElementById('lowpass-value');
+        const gainValue = document.getElementById('gain-value');
+        const byteBackground = document.getElementById('byte-background');
+        const byteContent = document.getElementById('byte-content');
+        const metadataContainer = document.getElementById('metadata-container');
+        const metadataCodec = document.getElementById('metadata-codec');
+        const metadataBitrate = document.getElementById('metadata-bitrate');
+        const metadataSize = document.getElementById('metadata-size');
+        const metadataSampleRate = document.getElementById('metadata-sample-rate');
+        const metadataSampleSize = document.getElementById('metadata-sample-size');
+        const metadataSamples = document.getElementById('metadata-samples');
+        
+        // WASM module reference
+        let zigModule = null;
+        
+        // Metadata object to store audio information
+        let metadata = {
+            codec: '',
+            bitrate: 0,
+            size: 0,
+            sample_rate: 44100, // Default sample rate
+            sample_size: 16,    // Default sample size
+            samples: 0
+        };
+        
+        // Streaming state
+        let streamingActive = false;
+        let animationFrameId = null;
+        let lastTimestamp = 0;
+        let currentStreamPosition = 0;
+        const BYTES_PER_STREAM = 8; // Smaller chunks for smoother streaming
+        
+        // Background byte data
+        let backgroundBytes = [];
+        let pendingBytes = [];
+        let isProcessingBytes = false;
+        const MAX_BACKGROUND_LINES = 300;
+        
+        // Audio context and nodes
+        let audioContext = null;
+        let audioQueue = [];
+        let isPlaying = false;
+        let currentSource = null;
+        let lowpassNode = null;
+        let gainNode = null;
+        let totalSamples = 0;
+        let playedSamples = 0;
+        let startTime = 0;
+        let pauseTime = 0;
+        
+        // Calculate how many characters fit in a line
+        function calculateCharsPerLine() {
+            const testElement = document.createElement('span');
+            testElement.style.fontFamily = 'monospace';
+            testElement.style.fontSize = byteContent.style.fontSize;
+            testElement.style.visibility = 'hidden';
+            testElement.textContent = 'X';
+            document.body.appendChild(testElement);
+            
+            const charWidth = testElement.getBoundingClientRect().width;
+            document.body.removeChild(testElement);
+            
+            // Add a small buffer to account for reduced padding
+            return Math.floor(window.innerWidth / charWidth) - 2;
+        }
+        
+        // Calculate how many lines fit in the viewport
+        function calculateLinesInViewport() {
+            const testElement = document.createElement('div');
+            testElement.style.fontFamily = 'monospace';
+            testElement.style.fontSize = byteContent.style.fontSize;
+            testElement.style.visibility = 'hidden';
+            testElement.textContent = 'X';
+            document.body.appendChild(testElement);
+            
+            const lineHeight = testElement.getBoundingClientRect().height;
+            document.body.removeChild(testElement);
+            
+            return Math.floor(window.innerHeight / lineHeight);
+        }
+        
+        // Adjust font size to fill the screen
+        function adjustFontSize() {
+            const windowWidth = window.innerWidth;
+            const windowHeight = window.innerHeight;
+            
+            // Calculate font size based on window dimensions - doubled
+            const baseFontSize = Math.min(windowWidth / 40, windowHeight / 20);
+            byteContent.style.fontSize = `${baseFontSize}px`;
+            
+            // Update the background to fill the screen
+            updateByteBackground();
+        }
+        
+        // Log messages to console only
+        function logMessage(message) {
+            console.log(message);
+        }
+        
+        // Add bytes to background queue
+        function addToBackground(message) {
+            if (message.includes(':')) {
+                // Pad the message to fill the entire width
+                const charsPerLine = calculateCharsPerLine();
+                const paddedMessage = padMessageToWidth(message, charsPerLine);
+                
+                // Add to pending queue
+                pendingBytes.push(paddedMessage);
+                
+                // Start processing if not already
+                if (!isProcessingBytes) {
+                    processNextByte();
+                }
+            }
+        }
+        
+        // Process next byte from the queue
+        function processNextByte() {
+            if (pendingBytes.length === 0) {
+                isProcessingBytes = false;
+                return;
+            }
+            
+            isProcessingBytes = true;
+            const nextByte = pendingBytes.shift();
+            
+            // Add to background
+            backgroundBytes.push(nextByte);
+            
+            // Keep only the last MAX_BACKGROUND_LINES lines
+            if (backgroundBytes.length > MAX_BACKGROUND_LINES) {
+                backgroundBytes.shift();
+            }
+            
+            // Update the background
+            updateByteBackground();
+            
+            // Process next byte immediately
+            if (pendingBytes.length > 0) {
+                setTimeout(processNextByte, 20); // Small delay to prevent UI blocking
+            } else {
+                isProcessingBytes = false;
+            }
+        }
+        
+        // Pad a message to fill the entire width
+        function padMessageToWidth(message, width) {
+            // Ensure all messages are the same length by truncating or padding
+            if (message.length > width) {
+                // Truncate if too long
+                return message.substring(0, width);
+            }
+            
+            // Calculate padding needed on each side
+            const totalPadding = width - message.length;
+            const leftPadding = Math.floor(totalPadding / 2);
+            
+            // Use minimal padding to get closer to the edges
+            return ' '.repeat(Math.max(1, leftPadding / 4)) + message + ' '.repeat(Math.max(1, (totalPadding - leftPadding) / 4));
+        }
+        
+        // Update the byte background display
+        function updateByteBackground() {
+            byteContent.innerHTML = '';
+            
+            // Calculate visible lines
+            const visibleLines = calculateLinesInViewport();
+            const startIndex = Math.max(0, backgroundBytes.length - visibleLines);
+            
+            // Add empty lines at the top if needed
+            if (backgroundBytes.length < visibleLines) {
+                const emptyLines = visibleLines - backgroundBytes.length;
+                for (let i = 0; i < emptyLines; i++) {
+                    const emptyLine = document.createElement('div');
+                    emptyLine.className = 'byte-line';
+                    emptyLine.innerHTML = '&nbsp;';
+                    byteContent.appendChild(emptyLine);
+                }
+            }
+            
+            // Add actual content lines
+            for (let i = startIndex; i < backgroundBytes.length; i++) {
+                const lineElement = document.createElement('div');
+                lineElement.className = 'byte-line';
+                lineElement.textContent = backgroundBytes[i];
+                
+                byteContent.appendChild(lineElement);
+            }
+        }
+        
+        // Clear the background
+        function clearBackground() {
+            backgroundBytes = [];
+            pendingBytes = [];
+            isProcessingBytes = false;
+            updateByteBackground();
+        }
+        
+        // Start streaming bytes in real time
+        function startStreamingBytes() {
+            if (streamingActive) {
+                return;
+            }
+            
+            // Clear any existing background bytes first
+            clearBackground();
+            
+            streamingActive = true;
+            currentStreamPosition = 0;
+            lastTimestamp = 0;
+            
+            // Start the animation frame loop for real-time streaming
+            function streamFrame(timestamp) {
+                if (!streamingActive || !isPlaying) {
+                    streamingActive = false;
+                    return;
+                }
+                
+                // Calculate position based on audio playback progress
+                const progress = playedSamples / totalSamples;
+                const totalBytes = zigModule.getBufferUsed();
+                const targetPosition = Math.floor(progress * totalBytes);
+                
+                // Only log if position has changed enough
+                if (Math.abs(targetPosition - currentStreamPosition) > BYTES_PER_STREAM) {
+                    // Intercept the log output for background display
+                    const originalConsoleLog = window.consoleLog;
+                    window.consoleLog = (message) => {
+                        addToBackground(message);
+                        if (originalConsoleLog) originalConsoleLog(message);
+                    };
+                    
+                    // Log bytes at the current position
+                    zigModule.logBytesAtPosition(targetPosition, BYTES_PER_STREAM);
+                    
+                    // Restore original console log
+                    window.consoleLog = originalConsoleLog;
+                    
+                    // Update current position
+                    currentStreamPosition = targetPosition;
+                }
+                
+                // Request next frame
+                animationFrameId = requestAnimationFrame(streamFrame);
+            }
+            
+            // Start the animation frame loop
+            animationFrameId = requestAnimationFrame(streamFrame);
+        }
+        
+        // Stop streaming bytes
+        function stopStreamingBytes() {
+            streamingActive = false;
+            if (animationFrameId) {
+                cancelAnimationFrame(animationFrameId);
+                animationFrameId = null;
+            }
+        }
+        
+        // Format file size in human-readable format
+        function formatFileSize(bytes) {
+            if (bytes === 0) return '0 Bytes';
+            
+            const k = 1024;
+            const sizes = ['Bytes', 'KB', 'MB', 'GB'];
+            const i = Math.floor(Math.log(bytes) / Math.log(k));
+            
+            return parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        
+        // Format bitrate in human-readable format
+        function formatBitrate(bps) {
+            if (bps === 0) return '0 bps';
+            
+            const k = 1000;
+            const sizes = ['bps', 'Kbps', 'Mbps', 'Gbps'];
+            const i = Math.floor(Math.log(bps) / Math.log(k));
+            
+            return parseFloat((bps / Math.pow(k, i)).toFixed(2)) + ' ' + sizes[i];
+        }
+        
+        // Update metadata display
+        function updateMetadataDisplay(codec, bitrate, size, sampleRate, sampleSize, samples) {
+            metadataCodec.textContent = codec;
+            metadataBitrate.textContent = formatBitrate(bitrate);
+            metadataSize.textContent = formatFileSize(size);
+            metadataSampleRate.textContent = sampleRate + ' Hz';
+            metadataSampleSize.textContent = sampleSize + ' bit';
+            metadataSamples.textContent = samples;
+            
+            // Show metadata container
+            metadataContainer.style.display = 'block';
+        }
+        
+        // Initialize WebAssembly module
+        async function initWasm() {
+            try {
+                // Load the actual WASM file
+                const wasmUrl = 'mp4_parser.wasm';
+                
+                // Fetch the WASM module
+                const response = await fetch(wasmUrl);
+                const wasmBytes = await response.arrayBuffer();
+                
+                // Environment imports for our Zig code
+                const imports = {
+                    env: {
+                        consoleLog: (ptr, len) => {
+                            const buffer = new Uint8Array(zigModule.memory.buffer);
+                            const message = new TextDecoder().decode(buffer.subarray(ptr, ptr + len));
+                            
+                            // Store original console log function
+                            window.consoleLog = (msg) => {
+                                console.log(msg);
+                            };
+                            
+                            // Only add to background if we're actively streaming
+                            // and it's a byte format message (contains hex address)
+                            if (streamingActive && message.includes(':') && message.match(/0x[0-9A-F]+:/)) {
+                                addToBackground(message);
+                            }
+                            console.log(message);
+                        },
+                        sendPCMSamples: (ptr, len) => {
+                            if (!audioContext) initAudio();
+                            
+                            const samples = new Int16Array(zigModule.memory.buffer, ptr, len);
+                            const sampleRate = metadata.sample_rate || 44100; // Use default if not set
+                            const audioBuffer = audioContext.createBuffer(1, len, sampleRate);
+                            const channelData = audioBuffer.getChannelData(0);
+                            
+                            // Convert Int16 to Float32
+                            for (let i = 0; i < len; i++) {
+                                channelData[i] = samples[i] / 32768.0;
+                            }
+                            
+                            audioQueue.push(audioBuffer);
+                            totalSamples += len;
+                            
+                            if (isPlaying && !currentSource) {
+                                playNextBuffer();
+                            }
+                        },
+                        updateMetadata: (codecPtr, codecLen, bitrate, size, sampleRate, sampleSize, samples) => {
+                            const buffer = new Uint8Array(zigModule.memory.buffer);
+                            const codec = new TextDecoder().decode(buffer.subarray(codecPtr, codecPtr + codecLen));
+                            
+                            // Store values in the metadata object
+                            metadata.codec = codec;
+                            metadata.bitrate = bitrate;
+                            metadata.size = size;
+                            metadata.sample_rate = sampleRate;
+                            metadata.sample_size = sampleSize;
+                            metadata.samples = samples;
+                            
+                            // Update metadata display
+                            updateMetadataDisplay(codec, bitrate, size, sampleRate, sampleSize, samples);
+                            logMessage(`Metadata updated: ${codec}, ${bitrate} bps, ${size} bytes`);
+                        }
+                    }
+                };
+                
+                // Instantiate the WebAssembly module
+                const { instance } = await WebAssembly.instantiate(wasmBytes, imports);
+                zigModule = instance.exports;
+                
+                // Now that the module is loaded, update the UI
+                statusElement.textContent = "Ready to process MP4 files";
+                logMessage("MP4 Parser initialized");
+                
+                // Enable file input after module is ready
+                selectButton.disabled = false;
+            } catch (error) {
+                statusElement.textContent = "Failed to load WASM module: " + error.message;
+                console.error("WASM initialization error:", error);
+            }
+        }
+        
+        // Initialize Web Audio API
+        function initAudio() {
+            if (!audioContext) {
+                audioContext = new (window.AudioContext || window.webkitAudioContext)();
+                
+                // Create filter nodes
+                lowpassNode = audioContext.createBiquadFilter();
+                lowpassNode.type = 'lowpass';
+                lowpassNode.frequency.value = 20000;
+                
+                gainNode = audioContext.createGain();
+                gainNode.gain.value = 1.0;
+                
+                // Connect nodes
+                lowpassNode.connect(gainNode);
+                gainNode.connect(audioContext.destination);
+            }
+        }
+        
+        // Play next buffer in queue
+        function playNextBuffer() {
+            if (!isPlaying || audioQueue.length === 0) {
+                if (audioQueue.length === 0) {
+                    stopPlayback();
+                }
+                return;
+            }
+            
+            const buffer = audioQueue.shift();
+            currentSource = audioContext.createBufferSource();
+            currentSource.buffer = buffer;
+            
+            // Connect through filter chain
+            currentSource.connect(lowpassNode);
+            
+            // Calculate start time
+            if (startTime === 0) {
+                startTime = audioContext.currentTime;
+            }
+            
+            currentSource.onended = () => {
+                playedSamples += buffer.length;
+                updateProgress();
+                currentSource = null;
+                playNextBuffer();
+            };
+            
+            currentSource.start();
+        }
+        
+        // Update progress bar and time display
+        function updateProgress() {
+            if (!isPlaying) return;
+            
+            const progress = (playedSamples / totalSamples) * 100;
+            progressBar.style.width = `${progress}%`;
+            
+            const currentTime = audioContext.currentTime - startTime;
+            const duration = totalSamples / metadata.sample_rate;
+            timeDisplay.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
+            
+            requestAnimationFrame(updateProgress);
+        }
+        
+        // Format time as mm:ss
+        function formatTime(seconds) {
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${mins}:${secs.toString().padStart(2, '0')}`;
+        }
+        
+        // Start playback
+        function startPlayback() {
+            if (!audioContext) initAudio();
+            isPlaying = true;
+            playBtn.disabled = true;
+            pauseBtn.disabled = false;
+            playNextBuffer();
+            startStreamingBytes();
+        }
+        
+        // Stop playback
+        function stopPlayback() {
+            isPlaying = false;
+            if (currentSource) {
+                currentSource.stop();
+                currentSource = null;
+            }
+            playBtn.disabled = false;
+            pauseBtn.disabled = true;
+            stopStreamingBytes();
+        }
+        
+        // Event listeners
+        selectButton.addEventListener('click', () => fileInput.click());
+        
+        fileInput.addEventListener('change', (e) => {
+            if (e.target.files.length > 0) {
+                handleFile(e.target.files[0]);
+            }
+        });
+        
+        // Drag and drop handling
+        uploadArea.addEventListener('dragover', (e) => {
+            e.preventDefault();
+            uploadArea.classList.add('drag-over');
+        });
+        
+        uploadArea.addEventListener('dragleave', () => {
+            uploadArea.classList.remove('drag-over');
+        });
+        
+        uploadArea.addEventListener('drop', (e) => {
+            e.preventDefault();
+            uploadArea.classList.remove('drag-over');
+            
+            if (e.dataTransfer.files.length > 0) {
+                handleFile(e.dataTransfer.files[0]);
+            }
+        });
+        
+        // Window resize event
+        window.addEventListener('resize', () => {
+            adjustFontSize();
+        });
+        
+        // Initialize the application
+        window.addEventListener('load', () => {
+            selectButton.disabled = true; // Disable until WASM loads
+            adjustFontSize(); // Set initial font size
+            initWasm();
+        });
+        
+        // Event listeners for audio controls
+        playBtn.addEventListener('click', startPlayback);
+        pauseBtn.addEventListener('click', stopPlayback);
+        
+        lowpassControl.addEventListener('input', (e) => {
+            const freq = parseFloat(e.target.value);
+            lowpassNode.frequency.value = freq;
+            lowpassValue.textContent = `${freq} Hz`;
+        });
+        
+        gainControl.addEventListener('input', (e) => {
+            const gain = parseFloat(e.target.value);
+            gainNode.gain.value = gain;
+            gainValue.textContent = gain.toFixed(1);
+        });
+        
+        progressContainer.addEventListener('click', (e) => {
+            const rect = progressContainer.getBoundingClientRect();
+            const pos = (e.clientX - rect.left) / rect.width;
+            playedSamples = Math.floor(totalSamples * pos);
+            updateProgress();
+        });
+        
+        // Update file handling
+        function handleFile(file) {
+            if (!file || (!file.type.includes('mp4') && !file.type.includes('m4a'))) {
+                logMessage("Please select a valid MP4/M4A file");
+                return;
+            }
+            
+            // Reset state
+            zigModule.resetBuffer();
+            audioQueue = [];
+            totalSamples = 0;
+            playedSamples = 0;
+            startTime = 0;
+            isPlaying = false;
+            if (currentSource) {
+                currentSource.stop();
+                currentSource = null;
+            }
+            
+            metadataContainer.style.display = 'none';
+            audioContainer.style.display = 'none';
+            uploadArea.style.display = 'block';
+            stopStreamingBytes();
+            clearBackground();
+            
+            statusElement.textContent = `Processing: ${file.name}`;
+            
+            // Read file in chunks using FileReader
+            const chunkSize = 1024 * 1024; // 1MB chunks
+            let offset = 0;
+            
+            function readNextChunk() {
+                const reader = new FileReader();
+                
+                reader.onload = function(e) {
+                    const chunk = new Uint8Array(e.target.result);
+                    
+                    // Copy the chunk data to the WebAssembly memory
+                    // First, get a pointer to the WebAssembly memory
+                    const wasmMemory = new Uint8Array(zigModule.memory.buffer);
+                    
+                    // Copy the chunk data to the WebAssembly memory
+                    for (let i = 0; i < chunk.length; i++) {
+                        wasmMemory[i] = chunk[i];
+                    }
+                    
+                    // Call the addData function with the pointer and length
+                    zigModule.addData(0, chunk.length);
+                    
+                    // Update progress
+                    offset += chunk.length;
+                    const progress = Math.min(100, Math.round((offset / file.size) * 100));
+                    statusElement.textContent = `Processing: ${progress}%`;
+                    
+                    // Continue reading chunks
+                    if (offset < file.size) {
+                        readNextChunk();
+                    } else {
+                        // Done reading the file
+                        statusElement.textContent = `Ready to play`;
+                        
+                        // Parse the MP4 file
+                        zigModule.parseMP4();
+                        
+                        // Show audio container
+                        audioContainer.style.display = 'block';
+                        uploadArea.style.display = 'none';
+                        
+                        // Don't log initial bytes - we'll only show streaming bytes
+                        // when the audio plays
+                    }
+                };
+                
+                reader.onerror = function() {
+                    statusElement.textContent = "Error reading file";
+                    logMessage("File read error");
+                };
+                
+                // Read a slice of the file
+                const slice = file.slice(offset, offset + chunkSize);
+                reader.readAsArrayBuffer(slice);
+            }
+            
+            // Start reading the file
+            readNextChunk();
+        }
+    </script>
+</body>
+</html>
