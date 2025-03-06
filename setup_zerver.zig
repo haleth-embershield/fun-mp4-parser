@@ -30,6 +30,16 @@ pub fn main() !void {
         else => return err, // Other errors should be propagated
     };
 
+    // Check if http-zerver already exists in assets directory
+    const exe_name = if (builtin.os.tag == .windows) "http-zerver.exe" else "http-zerver";
+    const server_path = try std.fs.path.join(allocator, &[_][]const u8{ assets_dir, exe_name });
+    defer allocator.free(server_path);
+
+    if (std.fs.accessAbsolute(server_path, .{})) |_| {
+        std.debug.print("http-zerver detected in assets directory, skipping setup...\n", .{});
+        return;
+    } else |_| {}
+
     std.debug.print("Setting up http-zerver...\n", .{});
 
     // Clean up existing http-zerver directory if it exists
@@ -83,15 +93,11 @@ pub fn main() !void {
 
     // Copy the executable to assets directory
     std.debug.print("Copying http-zerver executable to assets directory...\n", .{});
-    const exe_name = if (builtin.os.tag == .windows) "http-zerver.exe" else "http-zerver";
 
     const src_path = try std.fs.path.join(allocator, &[_][]const u8{ repo_dir, "zig-out", "bin", exe_name });
     defer allocator.free(src_path);
 
-    const dst_path = try std.fs.path.join(allocator, &[_][]const u8{ assets_dir, exe_name });
-    defer allocator.free(dst_path);
-
-    try std.fs.copyFileAbsolute(src_path, dst_path, .{});
+    try std.fs.copyFileAbsolute(src_path, server_path, .{});
 
     // Delete the repository directory
     std.debug.print("Cleaning up...\n", .{});

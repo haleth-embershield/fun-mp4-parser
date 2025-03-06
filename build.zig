@@ -51,20 +51,20 @@ pub fn build(b: *std.Build) void {
     });
     b.installArtifact(setup_zerver);
 
-    // Create www directory using setup_zerver
+    // Run setup_zerver to create directories and get http-zerver
     const setup_path = b.getInstallPath(.bin, "setup_zerver");
     const make_www = b.addSystemCommand(&[_][]const u8{setup_path});
     make_www.step.dependOn(b.getInstallStep());
 
-    // Create a step to copy the WASM file to the www directory
-    const copy_wasm = b.addInstallBinFile(exe.getEmittedBin(), "www/mp4_parser.wasm");
+    // Create a step to copy the WASM file to the root www directory
+    const copy_wasm = b.addInstallFile(exe.getEmittedBin(), "../www/mp4_parser.wasm");
     copy_wasm.step.dependOn(b.getInstallStep());
     copy_wasm.step.dependOn(&make_www.step);
 
-    // Create a step to copy all files from the assets directory to the www directory
+    // Create a step to copy all files from the assets directory to the root www directory
     const copy_assets = b.addInstallDirectory(.{
         .source_dir = b.path("assets"),
-        .install_dir = .{ .custom = "www" },
+        .install_dir = .{ .custom = "../www" },
         .install_subdir = "",
     });
     copy_assets.step.dependOn(&make_www.step);
@@ -78,8 +78,7 @@ pub fn build(b: *std.Build) void {
     const run_cmd = b.addSystemCommand(&[_][]const u8{
         server_path,
         "8000",
-        "www",
-        "-v",
+        ".",
     });
     run_cmd.step.dependOn(&copy_wasm.step);
     run_cmd.step.dependOn(&copy_assets.step);
