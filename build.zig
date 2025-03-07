@@ -4,9 +4,10 @@ const builtin = @import("builtin");
 // This is the build script for our MP4 Parser WebAssembly project
 pub fn build(b: *std.Build) void {
     // Standard target options for WebAssembly
-    const wasm_target = .{
+    const wasm_target = std.Target.Query{
         .cpu_arch = .wasm32,
         .os_tag = .freestanding,
+        .abi = .none,
     };
 
     // Get native target for setup_zerver
