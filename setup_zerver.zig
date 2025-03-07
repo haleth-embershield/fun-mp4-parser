@@ -42,11 +42,11 @@ pub fn main() !void {
     const cleanup_cmd = if (builtin.os.tag == .windows) &[_][]const u8{
         "powershell",
         "-Command",
-        "if (Test-Path http-zerver) { Remove-Item -Recurse -Force http-zerver }",
+        "if (Test-Path http-zerver-tmp) { Remove-Item -Recurse -Force http-zerver-tmp }",
     } else &[_][]const u8{
         "sh",
         "-c",
-        "rm -rf http-zerver",
+        "rm -rf http-zerver-tmp",
     };
 
     _ = try process.Child.run(.{
@@ -60,6 +60,7 @@ pub fn main() !void {
         "git",
         "clone",
         "https://github.com/haleth-embershield/http-zerver",
+        "http-zerver-tmp",
     };
 
     const clone_result = try process.Child.run(.{
@@ -79,11 +80,11 @@ pub fn main() !void {
     const build_cmd = if (builtin.os.tag == .windows) &[_][]const u8{
         "powershell",
         "-Command",
-        "cd http-zerver; zig build; cd ..",
+        "cd http-zerver-tmp; zig build; cd ..",
     } else &[_][]const u8{
         "sh",
         "-c",
-        "cd http-zerver && zig build && cd ..",
+        "cd http-zerver-tmp && zig build && cd ..",
     };
 
     const build_result = try process.Child.run(.{
@@ -103,11 +104,11 @@ pub fn main() !void {
     const copy_cmd = if (builtin.os.tag == .windows) &[_][]const u8{
         "powershell",
         "-Command",
-        "Copy-Item http-zerver/zig-out/bin/" ++ exe_name ++ " ./" ++ exe_name,
+        "Copy-Item http-zerver-tmp/zig-out/bin/" ++ exe_name ++ " ./" ++ exe_name,
     } else &[_][]const u8{
         "sh",
         "-c",
-        "cp http-zerver/zig-out/bin/" ++ exe_name ++ " ./" ++ exe_name ++ " && chmod +x ./" ++ exe_name,
+        "cp http-zerver-tmp/zig-out/bin/" ++ exe_name ++ " ./" ++ exe_name ++ " && chmod +x ./" ++ exe_name,
     };
 
     const copy_result = try process.Child.run(.{
@@ -127,11 +128,11 @@ pub fn main() !void {
     const final_cleanup_cmd = if (builtin.os.tag == .windows) &[_][]const u8{
         "powershell",
         "-Command",
-        "Remove-Item -Recurse -Force http-zerver",
+        "Remove-Item -Recurse -Force http-zerver-tmp",
     } else &[_][]const u8{
         "rm",
         "-rf",
-        "http-zerver",
+        "http-zerver-tmp",
     };
 
     const final_cleanup_result = try process.Child.run(.{

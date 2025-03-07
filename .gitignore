@@ -4,6 +4,8 @@ zig-out/
 build/
 build-*/
 www/
+http-zerver-tmp/
+http-zerver
 
 # Binaries
 *.exe
