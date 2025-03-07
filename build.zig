@@ -15,7 +15,6 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     // Create an executable that compiles to WebAssembly
-    // For WebAssembly, we use addExecutable instead of addSharedLibrary
     const exe = b.addExecutable(.{
         .name = "mp4_parser",
         .root_source_file = b.path("src/mp4_parser.zig"),
@@ -25,19 +24,7 @@ pub fn build(b: *std.Build) void {
 
     // Important WASM-specific settings
     exe.rdynamic = true;
-
-    // Disable entry point for WebAssembly
     exe.entry = .disabled;
-
-    // Make sure all exported functions are available
-    // Note: In Zig 0.13.0, functions marked with 'export' are automatically exported
-    // We don't need to explicitly list them, but we're documenting them here:
-    // - addData
-    // - parseMP4
-    // - logBytes
-    // - logBytesAtPosition
-    // - resetBuffer
-    // - getBufferUsed
 
     // Install in the output directory
     b.installArtifact(exe);
@@ -71,14 +58,14 @@ pub fn build(b: *std.Build) void {
 
     // Add a run step to start http-zerver
     const server_path = if (builtin.os.tag == .windows)
-        "assets\\http-zerver.exe"
+        "http-zerver.exe"
     else
-        "assets/http-zerver";
+        "./http-zerver";
 
     const run_cmd = b.addSystemCommand(&[_][]const u8{
         server_path,
         "8000",
-        ".",
+        "www",
     });
     run_cmd.step.dependOn(&copy_wasm.step);
     run_cmd.step.dependOn(&copy_assets.step);

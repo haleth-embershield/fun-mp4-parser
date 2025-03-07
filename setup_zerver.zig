@@ -15,28 +15,22 @@ pub fn main() !void {
     const repo_url = "https://github.com/haleth-embershield/http-zerver";
     const repo_dir = try std.fs.path.join(allocator, &[_][]const u8{ cwd, "http-zerver" });
     defer allocator.free(repo_dir);
-    const assets_dir = try std.fs.path.join(allocator, &[_][]const u8{ cwd, "assets" });
-    defer allocator.free(assets_dir);
     const www_dir = try std.fs.path.join(allocator, &[_][]const u8{ cwd, "www" });
     defer allocator.free(www_dir);
 
-    // Create directories if they don't exist
-    std.fs.makeDirAbsolute(assets_dir) catch |err| switch (err) {
-        error.PathAlreadyExists => {}, // Directory already exists, which is fine
-        else => return err, // Other errors should be propagated
-    };
+    // Create www directory if it doesn't exist
     std.fs.makeDirAbsolute(www_dir) catch |err| switch (err) {
         error.PathAlreadyExists => {}, // Directory already exists, which is fine
         else => return err, // Other errors should be propagated
     };
 
-    // Check if http-zerver already exists in assets directory
+    // Check if http-zerver already exists in root directory
     const exe_name = if (builtin.os.tag == .windows) "http-zerver.exe" else "http-zerver";
-    const server_path = try std.fs.path.join(allocator, &[_][]const u8{ assets_dir, exe_name });
+    const server_path = try std.fs.path.join(allocator, &[_][]const u8{ cwd, exe_name });
     defer allocator.free(server_path);
 
     if (std.fs.accessAbsolute(server_path, .{})) |_| {
-        std.debug.print("http-zerver detected in assets directory, skipping setup...\n", .{});
+        std.debug.print("http-zerver detected in root directory, skipping setup...\n", .{});
         return;
     } else |_| {}
 
@@ -91,8 +85,8 @@ pub fn main() !void {
     // Change back to root directory
     try process.changeCurDir(cwd);
 
-    // Copy the executable to assets directory
-    std.debug.print("Copying http-zerver executable to assets directory...\n", .{});
+    // Copy the executable to root directory
+    std.debug.print("Copying http-zerver executable to root directory...\n", .{});
 
     const src_path = try std.fs.path.join(allocator, &[_][]const u8{ repo_dir, "zig-out", "bin", exe_name });
     defer allocator.free(src_path);
@@ -103,5 +97,5 @@ pub fn main() !void {
     std.debug.print("Cleaning up...\n", .{});
     try std.fs.deleteTreeAbsolute(repo_dir);
 
-    std.debug.print("Setup complete! http-zerver has been copied to the assets directory.\n", .{});
+    std.debug.print("Setup complete! http-zerver has been copied to the root directory.\n", .{});
 }
