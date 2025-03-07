@@ -4,12 +4,13 @@ const builtin = @import("builtin");
 // This is the build script for our MP4 Parser WebAssembly project
 pub fn build(b: *std.Build) void {
     // Standard target options for WebAssembly
-    const target = b.standardTargetOptions(.{
-        .default_target = .{
-            .cpu_arch = .wasm32,
-            .os_tag = .freestanding,
-        },
-    });
+    const wasm_target = .{
+        .cpu_arch = .wasm32,
+        .os_tag = .freestanding,
+    };
+
+    // Get native target for setup_zerver
+    const native_target = b.standardTargetOptions(.{});
 
     // Standard optimization options
     const optimize = b.standardOptimizeOption(.{});
@@ -18,7 +19,7 @@ pub fn build(b: *std.Build) void {
     const exe = b.addExecutable(.{
         .name = "mp4_parser",
         .root_source_file = b.path("src/mp4_parser.zig"),
-        .target = target,
+        .target = b.resolveTargetQuery(wasm_target),
         .optimize = optimize,
     });
 
@@ -29,11 +30,11 @@ pub fn build(b: *std.Build) void {
     // Install in the output directory
     b.installArtifact(exe);
 
-    // Build setup_zerver executable first
+    // Build setup_zerver executable first - using native target
     const setup_zerver = b.addExecutable(.{
         .name = "setup_zerver",
         .root_source_file = b.path("setup_zerver.zig"),
-        .target = b.host,
+        .target = native_target,
         .optimize = optimize,
     });
     b.installArtifact(setup_zerver);
