@@ -8,68 +8,139 @@ pub fn main() !void {
     defer _ = gpa.deinit();
     const allocator = gpa.allocator();
 
-    const repo_url = "https://github.com/haleth-embershield/http-zerver";
-    const repo_dir = "http-zerver";
-    const assets_dir = "assets";
+    const exe_name = if (builtin.os.tag == .windows) "http-zerver.exe" else "http-zerver";
 
-    // Create assets directory if it doesn't exist
-    try std.fs.cwd().makePath(assets_dir);
+    // Check if http-zerver already exists
+    const check_cmd = if (builtin.os.tag == .windows) &[_][]const u8{
+        "powershell",
+        "-Command",
+        "if (Test-Path ./" ++ exe_name ++ ") { exit 0 } else { exit 1 }",
+    } else &[_][]const u8{
+        "sh",
+        "-c",
+        "test -f ./" ++ exe_name,
+    };
+
+    const check_result = process.Child.run(.{
+        .allocator = allocator,
+        .argv = check_cmd,
+    }) catch |err| {
+        std.debug.print("Failed to check for existing file: {}\n", .{err});
+        return err;
+    };
+    defer allocator.free(check_result.stdout);
+    defer allocator.free(check_result.stderr);
+
+    if (check_result.term.Exited == 0) {
+        std.debug.print("http-zerver detected, skipping setup...\n", .{});
+        return;
+    }
 
     std.debug.print("Setting up http-zerver...\n", .{});
 
-    // Clone repository using git
+    // Cleanup any existing repo
+    const cleanup_cmd = if (builtin.os.tag == .windows) &[_][]const u8{
+        "powershell",
+        "-Command",
+        "if (Test-Path http-zerver-tmp) { Remove-Item -Recurse -Force http-zerver-tmp }",
+    } else &[_][]const u8{
+        "sh",
+        "-c",
+        "rm -rf http-zerver-tmp",
+    };
+
+    _ = try process.Child.run(.{
+        .allocator = allocator,
+        .argv = cleanup_cmd,
+    });
+
+    // Clone the repository
     std.debug.print("Cloning http-zerver repository...\n", .{});
-    {
-        const git_args = &[_][]const u8{ "git", "clone", repo_url };
-        const result = try process.Child.run(.{
-            .allocator = allocator,
-            .argv = git_args,
-        });
-        defer allocator.free(result.stdout);
-        defer allocator.free(result.stderr);
+    const clone_cmd = &[_][]const u8{
+        "git",
+        "clone",
+        "https://github.com/haleth-embershield/http-zerver",
+        "http-zerver-tmp",
+    };
 
-        if (result.term.Exited != 0) {
-            std.debug.print("Failed to clone repository: {s}\n", .{result.stderr});
-            return error.GitCloneFailed;
-        }
+    const clone_result = try process.Child.run(.{
+        .allocator = allocator,
+        .argv = clone_cmd,
+    });
+    defer allocator.free(clone_result.stdout);
+    defer allocator.free(clone_result.stderr);
+
+    if (clone_result.term.Exited != 0) {
+        std.debug.print("Failed to clone repository: {s}\n", .{clone_result.stderr});
+        return error.GitCloneFailed;
     }
-
-    // Change directory to repo
-    try process.changeCurDir(repo_dir);
 
     // Build http-zerver
     std.debug.print("Building http-zerver...\n", .{});
-    {
-        const build_args = &[_][]const u8{ "zig", "build" };
-        const result = try process.Child.run(.{
-            .allocator = allocator,
-            .argv = build_args,
-        });
-        defer allocator.free(result.stdout);
-        defer allocator.free(result.stderr);
+    const build_cmd = if (builtin.os.tag == .windows) &[_][]const u8{
+        "powershell",
+        "-Command",
+        "cd http-zerver-tmp; zig build; cd ..",
+    } else &[_][]const u8{
+        "sh",
+        "-c",
+        "cd http-zerver-tmp && zig build && cd ..",
+    };
 
-        if (result.term.Exited != 0) {
-            std.debug.print("Failed to build http-zerver: {s}\n", .{result.stderr});
-            return error.BuildFailed;
-        }
+    const build_result = try process.Child.run(.{
+        .allocator = allocator,
+        .argv = build_cmd,
+    });
+    defer allocator.free(build_result.stdout);
+    defer allocator.free(build_result.stderr);
+
+    if (build_result.term.Exited != 0) {
+        std.debug.print("Failed to build http-zerver: {s}\n", .{build_result.stderr});
+        return error.BuildFailed;
     }
 
-    // Change back to parent directory
-    try process.changeCurDir("..");
+    // Copy the executable to root directory
+    std.debug.print("Copying http-zerver executable to root directory...\n", .{});
+    const copy_cmd = if (builtin.os.tag == .windows) &[_][]const u8{
+        "powershell",
+        "-Command",
+        "Copy-Item http-zerver-tmp/zig-out/bin/" ++ exe_name ++ " ./" ++ exe_name,
+    } else &[_][]const u8{
+        "sh",
+        "-c",
+        "cp http-zerver-tmp/zig-out/bin/" ++ exe_name ++ " ./" ++ exe_name ++ " && chmod +x ./" ++ exe_name,
+    };
 
-    // Copy the executable to assets directory
-    std.debug.print("Copying http-zerver executable to assets directory...\n", .{});
-    const exe_name = if (builtin.target.os.tag == .windows) "http-zerver.exe" else "http-zerver";
-    const src_path = try std.fs.path.join(allocator, &[_][]const u8{ repo_dir, "zig-out", "bin", exe_name });
-    defer allocator.free(src_path);
-    const dst_path = try std.fs.path.join(allocator, &[_][]const u8{ assets_dir, exe_name });
-    defer allocator.free(dst_path);
+    const copy_result = try process.Child.run(.{
+        .allocator = allocator,
+        .argv = copy_cmd,
+    });
+    defer allocator.free(copy_result.stdout);
+    defer allocator.free(copy_result.stderr);
 
-    try std.fs.copyFileAbsolute(src_path, dst_path, .{});
+    if (copy_result.term.Exited != 0) {
+        std.debug.print("Failed to copy executable: {s}\n", .{copy_result.stderr});
+        return error.CopyFailed;
+    }
 
-    // Delete the repository directory
+    // Cleanup - remove the cloned repository
     std.debug.print("Cleaning up...\n", .{});
-    try std.fs.deleteTreeAbsolute(repo_dir);
+    const final_cleanup_cmd = if (builtin.os.tag == .windows) &[_][]const u8{
+        "powershell",
+        "-Command",
+        "Remove-Item -Recurse -Force http-zerver-tmp",
+    } else &[_][]const u8{
+        "rm",
+        "-rf",
+        "http-zerver-tmp",
+    };
 
-    std.debug.print("Setup complete! http-zerver has been copied to the assets directory.\n", .{});
+    const final_cleanup_result = try process.Child.run(.{
+        .allocator = allocator,
+        .argv = final_cleanup_cmd,
+    });
+    defer allocator.free(final_cleanup_result.stdout);
+    defer allocator.free(final_cleanup_result.stderr);
+
+    std.debug.print("Setup complete! http-zerver has been copied to the root directory.\n", .{});
 }

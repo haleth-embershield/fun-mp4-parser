@@ -1,76 +1,78 @@
 const std = @import("std");
+const builtin = @import("builtin");
 
 // This is the build script for our MP4 Parser WebAssembly project
 pub fn build(b: *std.Build) void {
     // Standard target options for WebAssembly
-    const target = b.standardTargetOptions(.{
-        .default_target = .{
-            .cpu_arch = .wasm32,
-            .os_tag = .freestanding,
-        },
-    });
+    const wasm_target = std.Target.Query{
+        .cpu_arch = .wasm32,
+        .os_tag = .freestanding,
+        .abi = .none,
+    };
+
+    // Get native target for setup_zerver
+    const native_target = b.standardTargetOptions(.{});
 
     // Standard optimization options
     const optimize = b.standardOptimizeOption(.{});
 
     // Create an executable that compiles to WebAssembly
-    // For WebAssembly, we use addExecutable instead of addSharedLibrary
     const exe = b.addExecutable(.{
         .name = "mp4_parser",
         .root_source_file = b.path("src/mp4_parser.zig"),
-        .target = target,
+        .target = b.resolveTargetQuery(wasm_target),
         .optimize = optimize,
     });
 
     // Important WASM-specific settings
     exe.rdynamic = true;
-
-    // Disable entry point for WebAssembly
     exe.entry = .disabled;
-
-    // Make sure all exported functions are available
-    // Note: In Zig 0.13.0, functions marked with 'export' are automatically exported
-    // We don't need to explicitly list them, but we're documenting them here:
-    // - addData
-    // - parseMP4
-    // - logBytes
-    // - logBytesAtPosition
-    // - resetBuffer
-    // - getBufferUsed
 
     // Install in the output directory
     b.installArtifact(exe);
 
-    // Create a step to clear the www directory
-    const clear_www = b.addSystemCommand(&[_][]const u8{ "powershell", "-Command", "if (Test-Path www) { Remove-Item -Path www\\* -Recurse -Force }; if (-not (Test-Path www)) { New-Item -ItemType Directory -Path www }" });
-
-    // Create a step to copy the WASM file to the www directory
-    const copy_wasm = b.addSystemCommand(&[_][]const u8{
-        "powershell",                                        "-Command",            "Copy-Item",
-        b.fmt("{s}/bin/mp4_parser.wasm", .{b.install_path}), "www/mp4_parser.wasm",
+    // Build setup_zerver executable first - using native target
+    const setup_zerver = b.addExecutable(.{
+        .name = "setup_zerver",
+        .root_source_file = b.path("setup_zerver.zig"),
+        .target = native_target,
+        .optimize = optimize,
     });
+    b.installArtifact(setup_zerver);
+
+    // Run setup_zerver to create directories and get http-zerver
+    const setup_path = b.getInstallPath(.bin, "setup_zerver");
+    const make_www = b.addSystemCommand(&[_][]const u8{setup_path});
+    make_www.step.dependOn(b.getInstallStep());
+
+    // Create a step to copy the WASM file to the root www directory
+    const copy_wasm = b.addInstallFile(exe.getEmittedBin(), "../www/mp4_parser.wasm");
     copy_wasm.step.dependOn(b.getInstallStep());
-    copy_wasm.step.dependOn(&clear_www.step);
+    copy_wasm.step.dependOn(&make_www.step);
 
-    // Create a step to copy all files from the assets directory to the www directory
-    const copy_assets = b.addSystemCommand(&[_][]const u8{ "powershell", "-Command", "if (Test-Path assets) { Copy-Item -Path assets\\* -Destination www\\ -Recurse -Force }" });
-    copy_assets.step.dependOn(&clear_www.step);
-
-    // Add a run step to start a Python HTTP server
-    // Try both 'py' and 'python' commands to be compatible with different systems
-    // const run_cmd = b.addSystemCommand(&[_][]const u8{ "powershell", "-Command", "cd www; try { py -m http.server 8000 } catch { python -m http.server 8000 }" });
-    // Check if http-zerver exists and run setup if needed
-    const check_and_setup_server = b.addSystemCommand(&[_][]const u8{
-        "powershell",
-        "-Command",
-        "if (-not (Test-Path assets/http-zerver.exe)) { Write-Host 'http-zerver not found. Running setup...'; .\\setup_http_server.ps1 }",
+    // Create a step to copy all files from the assets directory to the root www directory
+    const copy_assets = b.addInstallDirectory(.{
+        .source_dir = b.path("assets"),
+        .install_dir = .{ .custom = "../www" },
+        .install_subdir = "",
     });
+    copy_assets.step.dependOn(&make_www.step);
 
     // Add a run step to start http-zerver
-    const run_cmd = b.addSystemCommand(&[_][]const u8{ "powershell", "-Command", "cd www; ./http-zerver.exe 8000 . -v" });
+    const server_path = if (builtin.os.tag == .windows)
+        "http-zerver.exe"
+    else
+        "./http-zerver";
+
+    const run_cmd = b.addSystemCommand(&[_][]const u8{
+        server_path,
+        "--port",
+        "8000",
+        "--dir",
+        "www",
+    });
     run_cmd.step.dependOn(&copy_wasm.step);
     run_cmd.step.dependOn(&copy_assets.step);
-    run_cmd.step.dependOn(&check_and_setup_server.step);
 
     const run_step = b.step("run", "Build, deploy, and start HTTP server");
     run_step.dependOn(&run_cmd.step);
