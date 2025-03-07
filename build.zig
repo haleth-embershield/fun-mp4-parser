@@ -64,7 +64,9 @@ pub fn build(b: *std.Build) void {
 
     const run_cmd = b.addSystemCommand(&[_][]const u8{
         server_path,
+        "--port",
         "8000",
+        "--dir",
         "www",
     });
     run_cmd.step.dependOn(&copy_wasm.step);
