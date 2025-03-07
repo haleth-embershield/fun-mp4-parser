@@ -494,36 +494,6 @@ fn formatBoxMessage(buf: []u8, type_code: [4]u8, size: u64) []u8 {
     return buf[0..pos];
 }
 
-// Helper function to log sample of bytes to the console
-export fn logBytes(count: usize) void {
-    const bytes_to_log = min(count, buffer_used);
-    var i: usize = 0;
-
-    while (i < bytes_to_log) {
-        var log_buf: [128]u8 = undefined;
-        const end = min(i + 16, bytes_to_log);
-        var log_pos: usize = 0;
-
-        // Format position (simplified hex formatting)
-        log_pos += formatHex(log_buf[log_pos..], i, 8);
-        log_buf[log_pos] = ':';
-        log_pos += 1;
-        log_buf[log_pos] = ' ';
-        log_pos += 1;
-
-        // Format hex values
-        var j: usize = i;
-        while (j < end) : (j += 1) {
-            log_pos += formatHex(log_buf[log_pos..], buffer[j], 2);
-            log_buf[log_pos] = ' ';
-            log_pos += 1;
-        }
-
-        logString(log_buf[0..log_pos]);
-        i = end;
-    }
-}
-
 // Log bytes at a specific position (for streaming during playback)
 export fn logBytesAtPosition(position: usize, count: usize) void {
     if (position >= buffer_used) return;
