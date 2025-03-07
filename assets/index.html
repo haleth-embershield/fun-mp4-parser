@@ -240,26 +240,6 @@
                 <audio id="media-player" controls style="width: 100%">
                     Your browser does not support the audio element.
                 </audio>
-                <button id="toggle-video" style="margin-top: 10px;">Show Video</button>
-            </div>
-            
-            <div id="video-container" style="display: none; margin-top: 10px;">
-                <video id="video-player" controls style="width: 100%">
-                    Your browser does not support the video element.
-                </video>
-            </div>
-            
-            <div id="filter-controls">
-                <div class="filter-group">
-                    <label for="lowpass">Lowpass Filter (Hz)</label>
-                    <input type="range" id="lowpass" min="20" max="20000" value="20000" step="1">
-                    <div class="filter-value" id="lowpass-value">20000 Hz</div>
-                </div>
-                <div class="filter-group">
-                    <label for="gain">Gain</label>
-                    <input type="range" id="gain" min="0" max="2" value="1" step="0.1">
-                    <div class="filter-value" id="gain-value">1.0</div>
-                </div>
             </div>
         </div>
     </div>
@@ -271,10 +251,6 @@
         const selectButton = document.getElementById('select-file');
         const statusElement = document.getElementById('status');
         const audioContainer = document.getElementById('audio-container');
-        const lowpassControl = document.getElementById('lowpass');
-        const gainControl = document.getElementById('gain');
-        const lowpassValue = document.getElementById('lowpass-value');
-        const gainValue = document.getElementById('gain-value');
         const byteBackground = document.getElementById('byte-background');
         const byteContent = document.getElementById('byte-content');
         const metadataContainer = document.getElementById('metadata-container');
@@ -284,9 +260,6 @@
         const metadataSampleRate = document.getElementById('metadata-sample-rate');
         const metadataSampleSize = document.getElementById('metadata-sample-size');
         const metadataSamples = document.getElementById('metadata-samples');
-        const toggleVideoBtn = document.getElementById('toggle-video');
-        const videoContainer = document.getElementById('video-container');
-        const videoPlayer = document.getElementById('video-player');
         const mediaPlayer = document.getElementById('media-player');
 
         // WASM module reference
@@ -314,18 +287,6 @@
         let pendingBytes = [];
         let isProcessingBytes = false;
         const MAX_BACKGROUND_LINES = 300;
-        
-        // Audio context and nodes
-        let audioContext = null;
-        let audioQueue = [];
-        let isPlaying = false;
-        let currentSource = null;
-        let lowpassNode = null;
-        let gainNode = null;
-        let totalSamples = 0;
-        let playedSamples = 0;
-        let startTime = 0;
-        let pauseTime = 0;
         
         // Calculate how many characters fit in a line
         function calculateCharsPerLine() {
@@ -391,12 +352,9 @@
             function streamFrame() {
                 if (!streamingActive) return;
 
-                // Get the current player (either audio or video, whichever is active)
-                const activePlayer = videoContainer.style.display !== 'none' ? videoPlayer : mediaPlayer;
-                
-                if (activePlayer && !activePlayer.paused) {
+                if (mediaPlayer && !mediaPlayer.paused) {
                     // Calculate position based on media playback progress
-                    const progress = activePlayer.currentTime / activePlayer.duration;
+                    const progress = mediaPlayer.currentTime / mediaPlayer.duration;
                     const totalBytes = zigModule.getBufferUsed();
                     const targetPosition = Math.floor(progress * totalBytes);
 
@@ -577,10 +535,6 @@
                             const blob = new Blob([mediaData], { type: 'video/mp4' });
                             const url = URL.createObjectURL(blob);
                             
-                            // Set the source for both audio and video players
-                            const mediaPlayer = document.getElementById('media-player');
-                            const videoPlayer = document.getElementById('video-player');
-                            
                             if (mediaPlayer) {
                                 mediaPlayer.src = url;
                                 // Clean up previous URL if it exists
@@ -588,15 +542,6 @@
                                     URL.revokeObjectURL(mediaPlayer.dataset.previousUrl);
                                 }
                                 mediaPlayer.dataset.previousUrl = url;
-                            }
-                            
-                            if (videoPlayer) {
-                                videoPlayer.src = url;
-                                // Clean up previous URL if it exists
-                                if (videoPlayer.dataset.previousUrl) {
-                                    URL.revokeObjectURL(videoPlayer.dataset.previousUrl);
-                                }
-                                videoPlayer.dataset.previousUrl = url;
                             }
                             
                             // Show the media container
@@ -642,9 +587,6 @@
         
         // Setup media player events for byte streaming
         function setupMediaPlayerEvents() {
-            const mediaPlayer = document.getElementById('media-player');
-            const videoPlayer = document.getElementById('video-player');
-            
             // Function to handle play event
             const handlePlay = () => {
                 startStreamingBytes();
@@ -656,10 +598,10 @@
             };
             
             // Function to handle timeupdate event
-            const handleTimeUpdate = (player) => {
+            const handleTimeUpdate = () => {
                 if (streamingActive) {
                     // Calculate progress based on current time
-                    const progress = player.currentTime / player.duration;
+                    const progress = mediaPlayer.currentTime / mediaPlayer.duration;
                     const totalBytes = zigModule.getBufferUsed();
                     const targetPosition = Math.floor(progress * totalBytes);
                     
@@ -673,126 +615,8 @@
                 mediaPlayer.addEventListener('play', handlePlay);
                 mediaPlayer.addEventListener('pause', handlePause);
                 mediaPlayer.addEventListener('ended', handlePause);
-                mediaPlayer.addEventListener('timeupdate', () => handleTimeUpdate(mediaPlayer));
+                mediaPlayer.addEventListener('timeupdate', handleTimeUpdate);
             }
-            
-            // Add event listeners to video player
-            if (videoPlayer) {
-                videoPlayer.addEventListener('play', handlePlay);
-                videoPlayer.addEventListener('pause', handlePause);
-                videoPlayer.addEventListener('ended', handlePause);
-                videoPlayer.addEventListener('timeupdate', () => handleTimeUpdate(videoPlayer));
-            }
-        }
-        
-        // Toggle video display
-        if (toggleVideoBtn) {
-            toggleVideoBtn.addEventListener('click', () => {
-                const isHidden = videoContainer.style.display === 'none';
-                videoContainer.style.display = isHidden ? 'block' : 'none';
-                toggleVideoBtn.textContent = isHidden ? 'Hide Video' : 'Show Video';
-                
-                // If showing video, sync its time with audio
-                if (isHidden && mediaPlayer && videoPlayer) {
-                    videoPlayer.currentTime = mediaPlayer.currentTime;
-                    if (!mediaPlayer.paused) {
-                        videoPlayer.play();
-                    }
-                }
-            });
-        }
-        
-        // Initialize Web Audio API
-        function initAudio() {
-            if (!audioContext) {
-                audioContext = new (window.AudioContext || window.webkitAudioContext)();
-                
-                // Create filter nodes
-                lowpassNode = audioContext.createBiquadFilter();
-                lowpassNode.type = 'lowpass';
-                lowpassNode.frequency.value = 20000;
-                
-                gainNode = audioContext.createGain();
-                gainNode.gain.value = 1.0;
-                
-                // Connect nodes
-                lowpassNode.connect(gainNode);
-                gainNode.connect(audioContext.destination);
-            }
-        }
-        
-        // Play next buffer in queue
-        function playNextBuffer() {
-            if (!isPlaying || audioQueue.length === 0) {
-                if (audioQueue.length === 0) {
-                    stopPlayback();
-                }
-                return;
-            }
-            
-            const buffer = audioQueue.shift();
-            currentSource = audioContext.createBufferSource();
-            currentSource.buffer = buffer;
-            
-            // Connect through filter chain
-            currentSource.connect(lowpassNode);
-            
-            // Calculate start time
-            if (startTime === 0) {
-                startTime = audioContext.currentTime;
-            }
-            
-            currentSource.onended = () => {
-                playedSamples += buffer.length;
-                updateProgress();
-                currentSource = null;
-                playNextBuffer();
-            };
-            
-            currentSource.start();
-        }
-        
-        // Update progress bar and time display
-        function updateProgress() {
-            if (!isPlaying) return;
-            
-            const progress = (playedSamples / totalSamples) * 100;
-            progressBar.style.width = `${progress}%`;
-            
-            const currentTime = audioContext.currentTime - startTime;
-            const duration = totalSamples / metadata.sample_rate;
-            timeDisplay.textContent = `${formatTime(currentTime)} / ${formatTime(duration)}`;
-            
-            requestAnimationFrame(updateProgress);
-        }
-        
-        // Format time as mm:ss
-        function formatTime(seconds) {
-            const mins = Math.floor(seconds / 60);
-            const secs = Math.floor(seconds % 60);
-            return `${mins}:${secs.toString().padStart(2, '0')}`;
-        }
-        
-        // Start playback
-        function startPlayback() {
-            if (!audioContext) initAudio();
-            isPlaying = true;
-            playBtn.disabled = true;
-            pauseBtn.disabled = false;
-            playNextBuffer();
-            startStreamingBytes();
-        }
-        
-        // Stop playback
-        function stopPlayback() {
-            isPlaying = false;
-            if (currentSource) {
-                currentSource.stop();
-                currentSource = null;
-            }
-            playBtn.disabled = false;
-            pauseBtn.disabled = true;
-            stopStreamingBytes();
         }
         
         // Event listeners
@@ -835,19 +659,6 @@
             initWasm();
         });
         
-        // Event listeners for audio controls
-        lowpassControl.addEventListener('input', (e) => {
-            const freq = parseFloat(e.target.value);
-            lowpassNode.frequency.value = freq;
-            lowpassValue.textContent = `${freq} Hz`;
-        });
-        
-        gainControl.addEventListener('input', (e) => {
-            const gain = parseFloat(e.target.value);
-            gainNode.gain.value = gain;
-            gainValue.textContent = gain.toFixed(1);
-        });
-        
         // Update file handling
         function handleFile(file) {
             if (!file || (!file.type.includes('mp4') && !file.type.includes('m4a'))) {
@@ -857,15 +668,7 @@
             
             // Reset state
             zigModule.resetBuffer();
-            audioQueue = [];
-            totalSamples = 0;
-            playedSamples = 0;
             startTime = 0;
-            isPlaying = false;
-            if (currentSource) {
-                currentSource.stop();
-                currentSource = null;
-            }
             
             metadataContainer.style.display = 'none';
             audioContainer.style.display = 'none';
